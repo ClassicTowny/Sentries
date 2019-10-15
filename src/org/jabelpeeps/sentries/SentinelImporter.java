@@ -2,8 +2,9 @@ package org.jabelpeeps.sentries;
 
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Set;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.EntityType;
@@ -28,9 +29,12 @@ public class SentinelImporter {
     static {
         EnumSet<SentinelTarget> ignored = EnumSet.of( SentinelTarget.MOBS, SentinelTarget.MONSTERS, SentinelTarget.PASSIVE_MOB );
         
+        Set<SentinelTarget> targets = new HashSet<>();               
         for ( EntityType each : EntityType.values() ) {
-            EnumSet<SentinelTarget> targets = EnumSet.copyOf( SentinelTarget.forEntityType( each ) );
+            targets.clear();
+            targets.addAll( SentinelTarget.forEntityType( each ) );
             targets.removeAll( ignored );
+            
             if ( targets.isEmpty() || targets.size() > 1 ) continue;
             
             targetMap.put( targets.iterator().next(), each );
@@ -65,7 +69,9 @@ public class SentinelImporter {
         sentry.respawnDelay = (int) ( sentinel.respawnTime / 20 );
         sentry.spawnLocation = sentinel.spawnPoint;
         sentry.guardeeEntity = Bukkit.getPlayer( sentinel.getGuarding() );
-        sentry.guardeeName = sentry.guardeeEntity.getName();
+        
+        if ( sentry.guardeeEntity != null ) 
+            sentry.guardeeName = sentry.guardeeEntity.getName();
         
         // Import targets
         if  (   sentinel.targets.contains( SentinelTarget.MOBS ) 
@@ -96,24 +102,24 @@ public class SentinelImporter {
             }
         }
         for ( String each : sentinel.npcNameTargets ) {
-            CommandHandler.getCommand( "target" ).call( null, npc.getName(), sentry, 0, "target", "add", "named", "npc", each );
+            CommandHandler.callCommand( sentry, "target", "add", "named:npc:" + each );
         }
         for ( String each : sentinel.groupTargets ) {
-            CommandHandler.getCommand( "group" ).call( null, npc.getName(), sentry, 0, "group", "target", each );            
+            CommandHandler.callCommand( sentry, "group", "target", each );            
         }
         for ( String each : sentinel.playerNameTargets ) {
-            CommandHandler.getCommand( "target" ).call( null, npc.getName(), sentry, 0, "target", "add", "named", "player", each );        
+            CommandHandler.callCommand( sentry, "target", "add", "named:player:" + each );        
         }
         for ( String each : sentinel.eventTargets ) {
-            CommandHandler.getCommand( "event" ).call( null, npc.getName(), sentry, 0, "event", "add", each );        
+            CommandHandler.callCommand( sentry, "event", "add", each );        
         }
         for ( String each : sentinel.otherTargets ) {
             if ( each.startsWith( "factions:" ) )
-                CommandHandler.getCommand( "factions" ).call( null, npc.getName(), sentry, 0, "factions", "target", each );  
+                CommandHandler.callCommand( sentry, "factions", "target", each );  
             else if ( each.startsWith( "towny:" ) )
-                CommandHandler.getCommand( "towny" ).call( null, npc.getName(), sentry, 0, "towny", "target", each );
+                CommandHandler.callCommand( sentry, "towny", "target", each );
             else if ( each.startsWith( "sbteam:" ) )
-                CommandHandler.getCommand( "scoreboard" ).call( null, npc.getName(), sentry, 0, "scoreboard", "target", each );
+                CommandHandler.callCommand( sentry, "scoreboard", "target", each );
         }
         /*
         These target specifiers are not implemented in Sentinel yet and so can't be imported
@@ -131,9 +137,7 @@ public class SentinelImporter {
                 case NPCS:
                     sentry.ignores.add( new AllNPCsTarget() ); break;
                 case OWNER:
-                    UUID uuid = npc.getTrait( Owner.class ).getOwnerId();
-                    if ( uuid != null )
-                        sentry.ignores.add( new OwnerTarget( uuid ) ); break;
+                    sentry.ignores.add( new OwnerTarget( npc.getTrait( Owner.class ) ) ); break;
                 default:
                     EntityType type = targetMap.get( each );
                     if ( type != null )
@@ -145,21 +149,21 @@ public class SentinelImporter {
             }
         }
         for ( String each : sentinel.npcNameIgnores ) {
-            CommandHandler.getCommand( "ignore" ).call( null, npc.getName(), sentry, 0, "ignore", "add", "named", "npc", each );
+            CommandHandler.callCommand( sentry, "ignore", "add", "named:npc:" + each );
         }
         for ( String each : sentinel.groupIgnores ) {
-            CommandHandler.getCommand( "group" ).call( null, npc.getName(), sentry, 0, "group", "ignore", each );            
+            CommandHandler.callCommand( sentry, "group", "ignore", each );            
         }
         for ( String each : sentinel.playerNameIgnores ) {
-            CommandHandler.getCommand( "ignore" ).call( null, npc.getName(), sentry, 0, "ignore", "add", "named", "player", each );        
+            CommandHandler.callCommand( sentry, "ignore", "add", "named:player:" + each );        
         }
         for ( String each : sentinel.otherIgnores ) {
             if ( each.startsWith( "factions:" ) )
-                CommandHandler.getCommand( "factions" ).call( null, npc.getName(), sentry, 0, "factions", "ignore", each );  
+                CommandHandler.callCommand( sentry, "factions", "ignore", each );  
             else if ( each.startsWith( "towny:" ) )
-                CommandHandler.getCommand( "towny" ).call( null, npc.getName(), sentry, 0, "towny", "ignore", each );
+                CommandHandler.callCommand( sentry, "towny", "ignore", each );
             else if ( each.startsWith( "sbteam:" ) )
-                CommandHandler.getCommand( "scoreboard" ).call( null, npc.getName(), sentry, 0, "scoreboard", "ignore", each );
+                CommandHandler.callCommand( sentry, "scoreboard", "ignore", each );
         }
         /*
         These ignore specifiers are not implemented in Sentinel yet and so can't be imported

@@ -5,16 +5,14 @@ import java.util.EnumSet;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.event.player.PlayerTeleportEvent.TeleportCause;
 
 import net.citizensnpcs.api.ai.Navigator;
-//import net.citizensnpcs.api.ai.GoalController;
-//import net.citizensnpcs.api.ai.Navigator;
+import net.citizensnpcs.api.ai.NavigatorParameters;
 import net.citizensnpcs.api.npc.NPC;
-//import net.citizensnpcs.util.NMS;
 import net.citizensnpcs.util.NMS;
-import net.citizensnpcs.util.Util;
 
 /** 
  * An Enum of states that a Sentry can be in.
@@ -32,22 +30,23 @@ public enum SentryStatus {
             inst.cancelAttack();
 
             if ( Sentries.denizenActive ) {
+                NPC npc = inst.getNPC();
 
-                DenizenHook.denizenAction( inst.getNPC(), "death", null );
-                DenizenHook.denizenAction( inst.getNPC(), "death by" + inst.causeOfDeath.toString().replace( " ", "_" ), null );
+                DenizenHook.denizenAction( npc, "death", null );
+                DenizenHook.denizenAction( npc, "death by" + inst.causeOfDeath.toString().replace( " ", "_" ), null );
 
                 if ( inst.killer != null ) {
                     
-                    Entity killer = Utils.getArcher( inst.killer );
+                    Entity killer = Utils.getSource( inst.killer );
 
                     if ( Sentries.debug )
-                        Sentries.debugLog( "Running Denizen actions for " + inst.getNPC().getName() + " with killer: " + killer.toString() );
+                        Sentries.debugLog( "Running Denizen actions for " + npc.getName() + " with killer: " + killer.toString() );
 
                     if ( killer instanceof OfflinePlayer )
-                        DenizenHook.denizenAction( inst.getNPC(), "death by player", (OfflinePlayer) killer );
+                        DenizenHook.denizenAction( npc, "death by player", (OfflinePlayer) killer );
                     else {
-                        DenizenHook.denizenAction( inst.getNPC(), "death by entity", null );
-                        DenizenHook.denizenAction( inst.getNPC(), "death by " + killer.getType().toString(), null );
+                        DenizenHook.denizenAction( npc, "death by entity", null );
+                        DenizenHook.denizenAction( npc, "death by " + killer.getType().toString(), null );
                     }
                 }
             }
@@ -86,16 +85,16 @@ public enum SentryStatus {
                 inst.reMountMount();
                 return SentryStatus.LOOKING;
             }
+            if ( inst.isBodyguardOnLeave() ) return this;
             
-            if  (   inst.guardeeEntity == null 
-                    && Util.isLoaded( inst.spawnLocation ) ) {
-                npc.spawn( inst.spawnLocation );
-            }
-            else if ( inst.guardeeEntity != null ) {
-                Location loc = inst.guardeeEntity.getLocation().add( 1, 0, 1 );
+            if ( inst.guardeeEntity != null ) {
+                Location loc = inst.guardeeEntity.getLocation();
                 if ( Utils.CanWarp( inst.guardeeEntity, loc.getWorld().getName() ) )
-                    npc.spawn( loc );
-            }            
+                    npc.spawn( loc.add( 1, 0, 1 ) );
+            }  
+            else if  ( Utils.isLoaded( inst.spawnLocation ) ) {
+                npc.spawn( inst.spawnLocation );
+            }          
             return this;
         }
     },    
@@ -104,34 +103,31 @@ public enum SentryStatus {
      *  {@link SentryStatus#LOOKING} */
     FOLLOWING {
         @Override SentryStatus update( SentryTrait inst ) {
-            if ( inst.guardeeEntity == null ) return checkPosition( inst );
             
-            LivingEntity myEntity = inst.getMyEntity(); 
+            Entity myEntity = inst.getNPC().getEntity(); 
             if ( myEntity == null ) return SentryStatus.NOT_SPAWNED;
+            
+            if ( inst.guardeeEntity == null ) return checkPosition( inst );
             
             Navigator navigator = inst.getNavigator();
             Location guardEntLoc = inst.guardeeEntity.getLocation();
-            Location npcLoc = myEntity.getLocation();
+            boolean isFlying = isFlying( myEntity.getType() );
             
-            if  (   !navigator.isNavigating() 
+            if  (   isFlying
+                    || !navigator.isNavigating()
                     || navigator.getEntityTarget() == null
                     || !navigator.getEntityTarget().getTarget().equals( inst.guardeeEntity ) ) {
-
-                if ( guardEntLoc.getWorld() != npcLoc.getWorld() ) {
-                    if ( System.currentTimeMillis() > inst.reassesTime ) {
-                        String worldname = guardEntLoc.getWorld().getName();
+                             
+                if ( isFlying ) guardEntLoc = guardEntLoc.add( 0, 5, 0 ); 
+                
+                if ( navigateOrTP( inst, myEntity, guardEntLoc.add( 1, 0, 1 ) ) ) {
                     
-                        if ( Utils.CanWarp( inst.guardeeEntity, worldname ) ) {
-                            inst.ifMountedGetMount().teleport( guardEntLoc.add( 1, 0, 1 ), TeleportCause.PLUGIN );
-                            return SentryStatus.LOOKING;
-                        }
-                        Utils.sendMessage( inst.guardeeEntity, inst.getNPC().getName(), S.CANT_FOLLOW, worldname );
-                        inst.reassesTime = System.currentTimeMillis() + 3000;
-                    }
-                    return this;
-                }        
-                if ( navigateOrTP( inst, guardEntLoc.add( 1, 0, 1 ) ) ) {
-                    navigator.setTarget( inst.guardeeEntity, false );
+                    if ( isFlying ) 
+                        navigator.setTarget( guardEntLoc );
+                    else 
+                        navigator.setTarget( inst.guardeeEntity, false );
+                    
+                    navigator.getLocalParameters().distanceMargin( inst.followDistance - 1 );             
                     return this;
                 }
             }
@@ -148,13 +144,13 @@ public enum SentryStatus {
         @Override SentryStatus update( SentryTrait inst ) {
             inst.tryToHeal();
             
-            LivingEntity myEntity = inst.getMyEntity(); 
+            Entity myEntity = inst.getNPC().getEntity(); 
             if ( myEntity == null ) return SentryStatus.NOT_SPAWNED;
             
             Navigator navigator = inst.getNavigator();
             if  (   !navigator.isNavigating() 
                     || !navigator.getTargetAsLocation().getBlock().equals( inst.spawnLocation.getBlock() ) ) {
-                if ( navigateOrTP( inst, inst.spawnLocation ) )
+                if ( navigateOrTP( inst, myEntity, inst.spawnLocation ) )
                     navigator.setTarget( inst.spawnLocation );
             }
             return checkPosition( inst );
@@ -175,6 +171,7 @@ public enum SentryStatus {
             inst.tryToHeal();
 
             if  (   !inst.targets.isEmpty() 
+                    && !inst.isBodyguardOnLeave()
                     && System.currentTimeMillis() > inst.reassesTime ) {
 
                 LivingEntity target = inst.findTarget();
@@ -192,7 +189,7 @@ public enum SentryStatus {
     ATTACKING {
         @Override SentryStatus update( SentryTrait inst ) {
                
-            LivingEntity myEntity = inst.getMyEntity();
+            Entity myEntity = inst.getNPC().getEntity();
 
             if (    myEntity != null
                     && inst.attackTarget != null 
@@ -203,6 +200,13 @@ public enum SentryStatus {
                 if  (   navigator.getEntityTarget() == null 
                         || navigator.getEntityTarget().getTarget() != inst.attackTarget ) {
                     navigator.setTarget( inst.attackTarget, true );
+                    
+                    NavigatorParameters params = navigator.getLocalParameters();
+                    params.attackStrategy( inst.getMyAttack() );
+
+                    double rangeSqrd = Utils.sqr( inst.getMyAttack().getApproxRange() );
+                    params.attackRange( rangeSqrd );  
+                    params.distanceMargin( rangeSqrd );
                 }
             } 
             // somehow we failed to attack the chosen target, so lets clear it.           
@@ -217,7 +221,8 @@ public enum SentryStatus {
      *  @return a new state when a change is needed. */
     abstract SentryStatus update( SentryTrait inst );
     
-    /** Checks whether the sentry is too far away from their spawn point, or the entity they are guarding. 
+    /** Checks whether the sentry is too far away from their spawn point, the entity they are guarding, or the
+     *  entity they are attacking.
      *  @return a new status for the Sentry if one is needed, otherwise the current status. */
     protected SentryStatus checkPosition( SentryTrait inst ) {
         
@@ -225,11 +230,13 @@ public enum SentryStatus {
         
         if ( inst.guardeeEntity != null ) {
             // Note to self:- inst.followDistance holds the square of the intended distance.
-            if ( myLocation.distanceSquared( inst.guardeeEntity.getLocation() ) >= inst.followDistance ) {
+            if  (   myLocation.getWorld() != inst.guardeeEntity.getWorld()
+                    || myLocation.distanceSquared( inst.guardeeEntity.getLocation() ) >= inst.followDistance ) {
                 return SentryStatus.FOLLOWING;
             }           
         }
-        else if ( myLocation.distanceSquared( inst.spawnLocation ) > Utils.sqr( inst.range ) ) {
+        else if (  myLocation.getWorld() != inst.spawnLocation.getWorld()
+                || myLocation.distanceSquared( inst.spawnLocation ) > Utils.sqr( inst.range ) ) {
             return SentryStatus.RETURNING_TO_SPAWNPOINT;
         } 
         
@@ -238,14 +245,15 @@ public enum SentryStatus {
                 if  (   inst.attackTarget == null 
                         || inst.attackTarget.isDead()
                         || inst.attackTarget.getWorld() != myLocation.getWorld()
-                        || myLocation.distanceSquared( inst.attackTarget.getLocation() ) > Utils.sqr( inst.range ) + 10 ) {
+                        || myLocation.distanceSquared( inst.attackTarget.getLocation() ) > Utils.sqr( inst.range ) ) {
                     inst.cancelAttack();
                     return SentryStatus.LOOKING;                   
                 }
                 break;
+            case RETURNING_TO_SPAWNPOINT:
+                if ( myLocation.distanceSquared( inst.spawnLocation ) > 1 ) break;
             case FOLLOWING: 
             case STUCK:
-            case RETURNING_TO_SPAWNPOINT:
                 inst.getNavigator().cancelNavigation();
                 return SentryStatus.LOOKING;
             default:           
@@ -254,14 +262,24 @@ public enum SentryStatus {
     }
     
     /** @return true if the navigator destination needs to be set, false if the distance is 
-     *  too far - this method will teleport the npc. */
-    protected boolean navigateOrTP( SentryTrait inst, Location loc ) {
+     *  too far - this method will have already teleported the npc. */
+    protected boolean navigateOrTP( SentryTrait inst, Entity myEntity, Location loc ) {
         
-        LivingEntity myEntity = inst.getMyEntity(); 
-        double distanceSqrd = Double.MAX_VALUE;
+        if ( loc.getWorld() != myEntity.getWorld() ) {
+            if ( System.currentTimeMillis() > inst.reassesTime ) {
+                String worldname = loc.getWorld().getName();
+            
+                if ( Utils.CanWarp( inst.guardeeEntity, worldname ) ) {
+                    inst.ifMountedGetMount().teleport( loc, TeleportCause.PLUGIN );
+                    return false;
+                }
+                Utils.sendMessage( inst.guardeeEntity, inst.getNPC().getName(), S.CANT_FOLLOW, worldname );
+                inst.reassesTime = System.currentTimeMillis() + 5000;
+            }
+            return false;
+        } 
         
-        if ( myEntity.getWorld() == loc.getWorld() )
-            distanceSqrd = myEntity.getLocation().distanceSquared( loc );
+        double distanceSqrd = myEntity.getLocation().distanceSquared( loc );
         
         if ( distanceSqrd < 2 ) return false;
 
@@ -275,6 +293,8 @@ public enum SentryStatus {
         return true;
     }
     
+    private static EnumSet<EntityType> flying = EnumSet.of( EntityType.ENDER_DRAGON, EntityType.BLAZE, EntityType.GHAST );
+    boolean isFlying( EntityType type ) { return flying.contains( type ); }
     private static EnumSet<SentryStatus> deadOrDieing = EnumSet.of( DEAD, DIEING );
     boolean isDeadOrDieing() { return deadOrDieing.contains( this ); }
 }

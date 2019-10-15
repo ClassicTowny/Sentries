@@ -9,7 +9,6 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.TreeMap;
 
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -35,6 +34,7 @@ import org.jabelpeeps.sentries.commands.IgnoreCommand;
 import org.jabelpeeps.sentries.commands.InfoCommand;
 import org.jabelpeeps.sentries.commands.InvincibleCommand;
 import org.jabelpeeps.sentries.commands.KillsDropCommand;
+import org.jabelpeeps.sentries.commands.ListAllCommand;
 import org.jabelpeeps.sentries.commands.MobsAttackCommand;
 import org.jabelpeeps.sentries.commands.MountCommand;
 import org.jabelpeeps.sentries.commands.NightVisionCommand;
@@ -47,14 +47,12 @@ import org.jabelpeeps.sentries.commands.SentriesNumberCommand;
 import org.jabelpeeps.sentries.commands.SentriesSimpleCommand;
 import org.jabelpeeps.sentries.commands.SentriesToggleCommand;
 import org.jabelpeeps.sentries.commands.SetSpawnCommand;
-import org.jabelpeeps.sentries.commands.SetStatusCommand;
 import org.jabelpeeps.sentries.commands.SpeedCommand;
 import org.jabelpeeps.sentries.commands.StrengthCommand;
 import org.jabelpeeps.sentries.commands.TargetComand;
 import org.jabelpeeps.sentries.commands.VoiceRangeCommand;
 import org.jabelpeeps.sentries.commands.WarningCommand;
 
-import lombok.Getter;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.trait.Owner;
@@ -62,7 +60,7 @@ import net.citizensnpcs.api.trait.trait.Owner;
 public class CommandHandler implements CommandExecutor, TabCompleter {
     
     private static Map<String, SentriesCommand> commandMap = new TreeMap<>();
-    private static String mainHelpIntro, mainHelpOutro, shortEquipList;
+    private static String mainHelpIntro, mainHelpOutro, shortEquipList, mobsList;
 
     static {
         commandMap.put( S.TARGET,       new TargetComand() );
@@ -91,11 +89,11 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
         commandMap.put( S.HEALRATE,     new HealRateCommand() );
         commandMap.put( S.RANGE,        new RangeCommand() );
         commandMap.put( S.VOICE_RANGE,  new VoiceRangeCommand() );
-        commandMap.put( "setstatus",    new SetStatusCommand() );
+        commandMap.put( "listall",      new ListAllCommand() );
         commandMap.put( "debuginfo",    new DebugInfoCommand() );
         
         SentriesNumberCommand command = new ArmourCommand();
-        commandMap.put( S.ARMOUR,       command );
+        commandMap.put( S.ARMOUR,       command ); 
         commandMap.put( S.ARMOR,        command );  // for people who can't spell =)
     }
     
@@ -111,13 +109,6 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
         commandMap.put( name, command );
     }
     
-    static SentriesComplexCommand nullCommand = new SentriesComplexCommand() {
-        @Getter String shortHelp = "", longHelp = "", perm = "";
-        @Override public void call( CommandSender sender, String npcName, SentryTrait inst, int nextArg, String... args ) {
-            Sentries.logger.info( "[Sentries] NPC:" + npcName + ". Target/Ignore could not be imported:- " + Utils.joinArgs( 0, args ) );
-        }
-    };
-    
     /** Static method to call a registered Sentries sub-command with arguments, only works for 
      *  'complex' commands - ones that have multiple possible arguments.
      * @param inst - the instance of SentryTrait on which to call the command 
@@ -130,11 +121,6 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
         
         command.call( null, null, inst, 0, args );
         return true;
-    }
-    
-    static SentriesComplexCommand getCommand ( String name ) {
-        SentriesComplexCommand command = (SentriesComplexCommand) commandMap.get( name.toLowerCase() );
-        return command != null ? command : nullCommand;
     }
 
     /**
@@ -174,16 +160,49 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
         player.sendMessage( Col.RED.concat( S.GET_COMMAND_HELP ) );
         return false;
     }
-
+    
+    public static String getAdditionalTargets( CommandSender sender ) {
+        
+        StringJoiner joiner = new StringJoiner( System.lineSeparator() );
+        joiner.add( "You can also use:- " ); 
+        
+        commandMap.entrySet().stream()
+                  .filter( e -> e.getValue() instanceof SentriesCommand.Targetting 
+                                && sender.hasPermission( e.getValue().getPerm() ) )
+                  .forEach( e -> joiner.add( 
+                          String.join( " ", Col.GOLD, " /sentry", e.getKey(), "...", Col.RESET, e.getValue().getShortHelp() ) ) );
+        
+        return joiner.toString();
+    }
+    
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+    public List<String> onTabComplete( CommandSender sender, Command command, String alias, String[] args ) {       
         
+        int nextArg = ( Utils.string2Int( args[0] ) > 0 ) ? 1 : 0;
+        
+        if ( args.length == 1 + nextArg ) {
+            return getCommandList( sender, args[nextArg] );
+        }  
+        else if (   args.length == 2 
+                    && S.HELP.equalsIgnoreCase( args[0] ) ) {
+            return getCommandList( sender, args[1] );
+        }
+        else if (   args.length >= 2 + nextArg
+                    && commandMap.containsKey( args[nextArg] ) ) {
+            SentriesCommand subcommand = commandMap.get( args[nextArg] );
+            
+            if (    subcommand instanceof SentriesCommand.Tabable
+                    && sender.hasPermission( subcommand.getPerm() ) )
+                return ((SentriesCommand.Tabable) subcommand).onTab( nextArg, args );
+        }
+        return null;       
+    }
+    
+    private List<String> getCommandList( CommandSender sender, String arg ) {
         List<String> tabs = new ArrayList<>( commandMap.keySet() );
-        
-        tabs.removeIf( t -> !t.startsWith( args[args.length - 1] ) 
-                         || !sender.hasPermission( commandMap.get( t ).getPerm() ) );
-                  
-        return tabs;       
+        tabs.removeIf( t -> !t.startsWith( arg ) 
+                            || !sender.hasPermission( commandMap.get( t ).getPerm() ) );
+        return tabs;   
     }
     
     @Override
@@ -199,13 +218,20 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                 
                 SentriesCommand command = commandMap.get( subcommand );
                 
-                if ( command != null && sender.hasPermission( command.getPerm() ) )               
+                if ( command != null && sender.hasPermission( command.getPerm() ) ) {
                     sender.sendMessage( command.getLongHelp() );
-                
-                else if ( S.LIST_MOBS.equals( subcommand ) ) 
-                    sender.sendMessage( String.join( ", ", Sentries.mobs.stream()
-                                                                         .map( m -> m.toString() )
-                                                                         .toArray( String[]::new ) ) );             
+                    
+                    if ( (S.TARGET + S.IGNORE).contains( subcommand ) )
+                        sender.sendMessage( getAdditionalTargets( sender ) );
+                }
+                else if ( S.LIST_MOBS.equals( subcommand ) ) {
+                    if ( mobsList == null ) {
+                        mobsList = String.join( ", ", Sentries.mobs.stream()
+                                                                   .map( m -> m.toString() )
+                                                                   .toArray( String[]::new ) );
+                    }
+                    sender.sendMessage( mobsList ); 
+                }
                 else if ( "listequips".equalsIgnoreCase( subcommand ) ) {
                     if ( shortEquipList == null ) {
                         Set<Material> allowed = EnumSet.copyOf( Sentries.helmets );
@@ -226,18 +252,18 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                     }
                     sender.sendMessage( shortEquipList );
                 }                
-                else 
-                    sender.sendMessage( S.ERROR_UNKNOWN_COMMAND );
+                else sender.sendMessage( S.ERROR_UNKNOWN_COMMAND );
+                
                 return true;
             }
             // if no arguments are added after '/sentry help'
             if ( mainHelpIntro == null ) {
                 StringJoiner joiner = new StringJoiner( System.lineSeparator() );
                 
-                joiner.add( String.join( "", Col.GOLD, "---------- Sentries Commands ----------", Col.RESET ) );
-                joiner.add( String.join( "", "Select NPC's with ", Col.GOLD, "'/npc sel'", Col.RESET, " before running commands, or" ) );
-                joiner.add( String.join( "", " use ", Col.GOLD, "/sentry #npcid <command> ", Col.RESET, "to run a command on the sentry with the given npcid." ) );
-                joiner.add( String.join( "", Col.GOLD, "-------------------------------", Col.RESET ) );
+                joiner.add( Utils.join( Col.GOLD, "---------- Sentries Commands ----------", Col.RESET ) );
+                joiner.add( Utils.join( "Select NPC's with ", Col.GOLD, "'/npc sel'", Col.RESET, " before running commands, or" ) );
+                joiner.add( Utils.join( " use ", Col.GOLD, "/sentry #npcid <command> ", Col.RESET, "to run a command on the sentry with the given npcid." ) );
+                joiner.add( Utils.join( Col.GOLD, "-------------------------------", Col.RESET ) );
                 
                 mainHelpIntro = joiner.toString();
             }
@@ -263,9 +289,9 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
             if ( mainHelpOutro == null ) {
                 StringJoiner joiner = new StringJoiner( System.lineSeparator() );
         
-                joiner.add( String.join( "", Col.GOLD, "-------------------------------", Col.RESET ) );
-                joiner.add( String.join( "", "do ", Col.GOLD, "/sentry help <command>", Col.RESET, " for further help on each command" ) );
-                joiner.add( String.join( "", Col.GOLD, "-------------------------------", Col.RESET ) );
+                joiner.add( Utils.join( Col.GOLD, "-------------------------------", Col.RESET ) );
+                joiner.add( Utils.join( "do ", Col.GOLD, "/sentry help <command>", Col.RESET, " for further help on each command" ) );
+                joiner.add( Utils.join( Col.GOLD, "-------------------------------", Col.RESET ) );
         
                 mainHelpOutro = joiner.toString();
             }           
@@ -285,7 +311,7 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
 
             if ( checkCommandPerm( S.PERM_RELOAD, sender ) ) {
 
-                ((Sentries) Bukkit.getPluginManager().getPlugin( "Sentries" )).reloadMyConfig();
+                Sentries.plugin.reloadMyConfig();
                 sender.sendMessage( Col.GREEN + "reloaded Sentries's config.yml file" );
             }
             return true;
@@ -301,8 +327,10 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
         if ( !enoughArgs( 1 + nextArg, inargs, sender ) ) return true;
         
         if  (   inargs[nextArg].toLowerCase().equals( "import" )
+                && inargs.length > nextArg + 1
                 && commandMap.containsKey( "import" )
-                && inargs[nextArg + 1].toLowerCase().equals( "all" ) ) {
+                && inargs[nextArg + 1].toLowerCase().equals( "all" ) 
+                && checkCommandPerm( commandMap.get( "import" ).getPerm(), sender ) ) {
             ((SentriesComplexCommand) commandMap.get( "import" )).call( sender, null, null, nextArg, inargs );
             return true;
         }
@@ -355,6 +383,7 @@ public class CommandHandler implements CommandExecutor, TabCompleter {
                 
                 if ( command instanceof SentriesSimpleCommand )
                     ((SentriesSimpleCommand) command).call( sender, npcName, inst );
+                
                 else if ( command instanceof SentriesComplexCommand )
                     ((SentriesComplexCommand) command).call( sender, npcName, inst, nextArg, inargs ); 
                 

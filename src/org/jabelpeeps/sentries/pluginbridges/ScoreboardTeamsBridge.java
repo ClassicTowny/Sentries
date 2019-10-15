@@ -8,7 +8,7 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.jabelpeeps.sentries.CommandHandler;
-import org.jabelpeeps.sentries.PluginTargetBridge;
+import org.jabelpeeps.sentries.PluginBridge;
 import org.jabelpeeps.sentries.S;
 import org.jabelpeeps.sentries.S.Col;
 import org.jabelpeeps.sentries.SentryTrait;
@@ -20,18 +20,15 @@ import org.jabelpeeps.sentries.targets.TargetType;
 
 import lombok.Getter;
 
-public class ScoreboardTeamsBridge implements PluginTargetBridge {
+public class ScoreboardTeamsBridge implements PluginBridge {
 
-    @Getter final String prefix = "SCOREBOARD";
+    final String prefix = "Scoreboard";
     @Getter final String activationMessage = "MC Scoreboard Teams active, the SCOREBOARD: target will function";
     protected static Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-    private SentriesComplexCommand command = new ScoreboardTeamsCommand();
-    @Getter private String commandHelp = 
-            String.join( "", "  using the ", Col.GOLD, "/sentry ", prefix.toLowerCase()," ... ", Col.RESET, "commands." ) ; 
 
     @Override
     public boolean activate() {
-        CommandHandler.addCommand( prefix.toLowerCase(), command );
+        CommandHandler.addCommand( prefix.toLowerCase(), new ScoreboardTeamsCommand() );
         return true; 
     }
 
@@ -40,10 +37,11 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
         @Getter final String shortHelp = "manage scoreboard-defined targets";
         @Getter final String perm = "sentry.scoreboardteams";
         private String helpTxt; 
+        
         @Override
         public String getLongHelp() { 
             if ( helpTxt == null ) {
-                helpTxt = String.join( "", 
+                helpTxt = Utils.join(
                         "do ", Col.GOLD, "/sentry scoreboard <target|ignore|remove|list|clearall> <TeamName> ", Col.RESET, 
                         "to have a sentry consider MC scoreboard membership when selecting targets.", System.lineSeparator(),
                         "  use ", Col.GOLD, "target ", Col.RESET, "to target players from <TeamName>", System.lineSeparator(),
@@ -69,11 +67,13 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
             if ( S.LIST.equals( subCommand ) ) {
                 StringJoiner joiner = new StringJoiner( ", " );
                 
-                inst.targets.stream().filter( t -> t instanceof ScoreboardTeamsTarget )
-                                     .forEach( t -> joiner.add( String.join( "", Col.RED, "Target: ", Utils.colon.split( t.getTargetString() )[2] ) ) );
+                inst.targets.stream()
+                            .filter( t -> t instanceof ScoreboardTeamsTarget )
+                            .forEach( t -> joiner.add( Utils.join( Col.RED, "Target: ", Utils.colon.split( t.getTargetString() )[2] ) ) );
                 
-                inst.ignores.stream().filter( t -> t instanceof ScoreboardTeamsTarget )
-                                     .forEach( t -> joiner.add( String.join( "", Col.GREEN, "Ignore: ", Utils.colon.split( t.getTargetString() )[2] ) ) );
+                inst.ignores.stream()
+                            .filter( t -> t instanceof ScoreboardTeamsTarget )
+                            .forEach( t -> joiner.add( Utils.join( Col.GREEN, "Ignore: ", Utils.colon.split( t.getTargetString() )[2] ) ) );
                 
                 if ( joiner.length() < 1 ) 
                     Utils.sendMessage( sender, Col.YELLOW, npcName, " has no scoreboard targets or ignores" );
@@ -113,7 +113,7 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
                     Utils.sendMessage( sender, Col.GREEN, team.getName(), " was removed from ", npcName, "'s list of ignores." );
                 else {
                     Utils.sendMessage( sender, Col.RED, npcName, " was neither targeting nor ignoring ", team.getName() );
-                    call( sender, npcName, inst, 0, "", S.LIST );
+                    if ( sender != null ) call( sender, npcName, inst, 0, "", S.LIST );
                     return;
                 }
                 inst.checkIfEmpty( sender );
@@ -129,7 +129,7 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
                 else 
                     Utils.sendMessage( sender, Col.RED, team.getName(), S.ALREADY_LISTED, npcName );
                 
-                call( sender, npcName, inst, 0, "", S.LIST );
+                if ( sender != null ) call( sender, npcName, inst, 0, "", S.LIST );
                 return;
             }
             
@@ -140,7 +140,7 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
                 else 
                     Utils.sendMessage( sender, Col.RED, team.getName(), S.ALREADY_LISTED, npcName );
 
-                call( sender, npcName, inst, 0, "", S.LIST );
+                if ( sender != null ) call( sender, npcName, inst, 0, "", S.LIST );
                 return;            
             } 
             Utils.sendMessage( sender, S.ERROR, " Sub-command not recognised!", Col.RESET, " please check ",
@@ -154,7 +154,8 @@ public class ScoreboardTeamsBridge implements PluginTargetBridge {
         
         ScoreboardTeamsTarget( Team target ) { 
             super( 40 );
-            team = target; 
+            team = target;
+            prettyString = "The Scoreboard Team:- " + team.getDisplayName();
         }    
         @Override
         public boolean includes( LivingEntity entity ) {

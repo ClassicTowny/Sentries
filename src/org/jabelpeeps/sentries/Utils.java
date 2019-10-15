@@ -12,10 +12,8 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.TNTPrimed;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.projectiles.ProjectileSource;
-import org.bukkit.util.Vector;
-import org.jabelpeeps.sentries.S.Col;
-import org.jabelpeeps.sentries.commands.SentriesCommand;
 
 import net.citizensnpcs.api.ai.NavigatorParameters;
 import net.citizensnpcs.api.npc.NPC;
@@ -24,60 +22,19 @@ import net.citizensnpcs.api.npc.NPC;
  * An abstract collection of useful static methods.
  */
 public abstract class Utils {
-    final static double angle = Math.toRadians( 45 ); 
-    final static double cos = Math.cos( angle );   
-    final static double sin = Math.sin( angle );
+    
+    public static boolean isLoaded( Location location ) {
+        if ( location == null || location.getWorld() == null ) return false;
+        
+        return location.getWorld().isChunkLoaded( location.getBlockX() >> 4, location.getBlockZ() >> 4 );
+    }
     
     public static double sqr( double d ) { return d * d; }
     
-    /** 
-     * Calculate the maximum range that a ballistic projectile can be fired on given speed and gravity.
-     *
-     * @param speed: projectile velocity
-     * @param gravity: force of gravity, positive is down
-     * @param initial_height: distance above flat terrain
-     *
-     * @return the maximum range
-     */
-     public static double getRange( double v, double g, double d ) {
-         return ( v * cos / g ) * ( v * sin + Math.sqrt( sqr( v ) * sqr( sin ) + 2 * g * d ) );
-     }
-
-     /** 
-      * Solve firing angles for a ballistic projectile with speed and gravity to hit a fixed position.
-     *
-     * @param myLoc - point projectile will fire from
-     * @param v - scalar speed of projectile
-     * @param targetLoc - point projectile is trying to hit
-     * @param g - force of gravity, positive down
-    
-     *
-     * @return the low-angle Vector to hit the target.
-     */
-     public static Vector getFiringVector( Vector myLoc, double v, Vector targetLoc, double g ) {
-    
-         Vector diff = targetLoc.subtract( myLoc );
-         Vector diffXZ = new Vector( diff.getX(), 0.0, diff.getZ() );
-         double groundDist = diffXZ.length();
-         diffXZ.normalize();
-    
-         double speed2 = sqr( v );
-         double y = diff.getY();
-    
-         double root = sqr( speed2 ) - g * ( g * sqr( groundDist ) + 2 * y * speed2 );
-    
-         // No solution
-         if ( root < 0 ) return null;
-    
-         double lowAng = Math.atan2( speed2 - Math.sqrt( root ), g * groundDist );
-    
-         return diffXZ.multiply( Math.cos( lowAng ) ).multiply( v ).setY( Math.sin( lowAng ) * v );
-     }
-
-     public static void copyNavParams( NavigatorParameters from, NavigatorParameters to ) {
-         to.attackRange( from.attackRange() );
-         to.attackDelayTicks( from.attackDelayTicks() );
-     }
+    public static void copyNavParams( NavigatorParameters from, NavigatorParameters to ) {
+        to.attackRange( from.attackRange() );
+        to.attackDelayTicks( from.attackDelayTicks() );
+    }
      
     public static void removeMount( int npcid ) {
 
@@ -110,19 +67,12 @@ public abstract class Utils {
             String worldPerm = S.PERM_BODYGUARD + worldname;
             
             if ( player.hasPermission( S.PERM_BODYGUARD + "*" ) ) {
-                // all players have "*" perm by default.
-               
-                if (    player.isPermissionSet( worldPerm )
-                        && !player.hasPermission( worldPerm ) ) {
-                    // denied in this world.
-                    return false;
-                }
-                return true;
+                // all players have "*" perm by default.             
+                return !player.isPermissionSet( worldPerm ) || player.hasPermission( worldPerm );
+                // returns false if denied in this world.
             }
-            if ( player.hasPermission( worldPerm ) ) {
-                // no "*"" but specifically allowed this world.
-                return true;
-            }
+            return player.hasPermission( worldPerm );
+            // no "*"" but specifically allowed this world.
         }
         return false;
     }
@@ -135,7 +85,7 @@ public abstract class Utils {
      * The method will return immediately if 'input' is null, and will remove
      * the tags related to any other arguments that are null objects.
      */
-    public static String format( String input, NPC npc, CommandSender player, Material item, String amount ) {
+    public static String format( String input, NPC npc, CommandSender player, ItemStack item, String amount ) {
 
         if ( input == null ) return "";
 
@@ -177,8 +127,9 @@ public abstract class Utils {
      * @param int
      *            MatID the ID to be named.
      */
-    static String getLocalItemName( Material mat ) {
-
+    static String getLocalItemName( ItemStack item ) {
+        Material mat = item.getType();
+        
         if ( mat == null || mat == Material.AIR )
             return "Hand";
 
@@ -221,7 +172,7 @@ public abstract class Utils {
 
     public static SentryTrait getSentryTrait( Entity ent ) {
     
-        if ( ent != null && ent instanceof LivingEntity ) {
+        if ( ent != null && ent instanceof LivingEntity && ent.hasMetadata( S.SENTRIES_META ) ) {
             return getSentryTrait( Sentries.registry.getNPC( ent ) );
         }
         return null;
@@ -242,7 +193,7 @@ public abstract class Utils {
      *         The shooter or source - if damager is a projectile or primed TNT.
      *         otherwise - null.
      */
-    static Entity getArcher( Entity damager ) {
+    public static Entity getSource( Entity damager ) {
         
         if ( damager instanceof LivingEntity ) return damager;
         
@@ -251,9 +202,10 @@ public abstract class Utils {
 
             if ( source instanceof Entity ) return (Entity) source;
         }  
-        else if ( damager instanceof TNTPrimed ) 
-            return ((TNTPrimed) damager).getSource();
-        
+        else if ( damager instanceof TNTPrimed ) {
+            Entity thrower = ThrownEntities.getThrower( damager );
+            return thrower != null ? thrower : ((TNTPrimed) damager).getSource();
+        }
         return null;
     }
     
@@ -309,30 +261,6 @@ public abstract class Utils {
 
     public static Pattern colon = Pattern.compile( ":" );
     
-    /**
-     * Static method to iterate over the activated PluginBridges, polling each one for command
-     * help text.
-     * 
-     * @return - the concatenated help Strings
-     */
-    public static String getAdditionalTargets() {
-        
-        StringJoiner joiner = new StringJoiner( System.lineSeparator() );
-        joiner.add( "You can also use:- " ); 
-        
-        SentriesCommand command = CommandHandler.getCommand( S.EVENT );
-        if ( command != CommandHandler.nullCommand ) {
-            joiner.add( join( Col.GOLD, "  /sentry ", S.EVENT, Col.RESET, " ", command.getShortHelp() ) );
-        }
-        
-        if ( !Sentries.activePlugins.isEmpty() ) {           
-            Sentries.activePlugins.parallelStream()
-                                  .filter( p -> p instanceof PluginTargetBridge )
-                                  .forEach( p -> joiner.add( ((PluginTargetBridge) p).getCommandHelp() ) );
-        }            
-        return joiner.toString();
-    }
-
     private static DecimalFormat df = new DecimalFormat( "0.0#" );
     public static String formatDbl( double d ) {
         return df.format( d );

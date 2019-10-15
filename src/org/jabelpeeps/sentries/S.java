@@ -114,7 +114,7 @@ public abstract class S {
     public final static String CON_RETALIATION = "Retaliation";
     public final static String CON_MOBS_ATTACK = "MobsAttack";
     public final static String CON_IGNORE_LOS = "IgnoreLOS";
-    public final static String CON_USE_WEAPON_STRENGTH = "UseWeapon4Strength";
+    public final static String CON_WEAPON4STRGTH = "UseWeapon4Strength";
     public final static String CON_NEW_ARMOUR_CALC = "UseNewArmourCalc";
     public final static String DEFAULT_TARGETS = "DefaultTargets";
     public final static String DEFAULT_IGNORES = "DefaultIgnores";
@@ -137,14 +137,15 @@ public abstract class S {
     public final static String PERM_TARGET = "sentry.target";
     public final static String PERM_IGNORE = "sentry.ignore";
     public final static String PERM_EVENT = "sentry.event";
+    public final static String PERM_DEBUGINFO = "sentry.debuginfo";
     public final static String PERM_INFO = "sentry.info";
     public final static String PERM_EQUIP = "sentry.equip";
     public final static String PERM_RELOAD = "sentry.reload";
-    public final static String PERM_DEBUG = "sentry.debug";
     public final static String PERM_SET_SPAWN = "sentry.setspawn";
     public final static String PERM_GUARD = "sentry.guard";
     public final static String PERM_WARNING = "sentry.warning";
     public final static String PERM_GREETING = "sentry.greeting";
+    public final static String PERM_LIST_ALL = "sentry.listall";
     public final static String PERM_WARNING_RANGE = "sentry.stats.warningrange";
     public final static String PERM_SPEED = "sentry.stats.speed";
     public final static String PERM_RANGE = "sentry.stats.range";
@@ -165,4 +166,5 @@ public abstract class S {
     public final static String PERM_INVINCIBLE = "sentry.options.invincible";
     public final static String PERM_BODYGUARD = "sentry.bodyguard."; // be sure to leave the last '.'
     public final static String PERM_CITS_ADMIN = "citizens.admin";
+    public final static String SENTRIES_META = "SentriesNPC";
 }

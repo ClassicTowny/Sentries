@@ -5,36 +5,39 @@ import java.util.StringJoiner;
 import org.bukkit.command.CommandSender;
 import org.jabelpeeps.sentries.S;
 import org.jabelpeeps.sentries.S.Col;
+import org.jabelpeeps.sentries.Sentries;
 import org.jabelpeeps.sentries.SentryTrait;
 import org.jabelpeeps.sentries.Utils;
 
 import lombok.Getter;
 
 
-public class InfoCommand implements SentriesComplexCommand {
+public class InfoCommand implements SentriesSimpleCommand {
     @Getter final String shortHelp = "view the attributes of a sentry";
     @Getter final String longHelp = "Displays a summary of all the configurable settings for a sentry.";
     @Getter final String perm = S.PERM_INFO;
     
     @Override
-    public void call( CommandSender sender, String npcName, SentryTrait inst, int nextArg, String... args ) {
+    public void call( CommandSender sender, String npcName, SentryTrait inst ) {
 
         StringJoiner joiner = new StringJoiner( System.lineSeparator() );
 
-        joiner.add( String.join( "", Col.GOLD, "------- Sentries Info for ", npcName, " (npcid - ",
-                                    String.valueOf( inst.getNPC().getId() ), ") ", "------" ) );
+        joiner.add( Utils.join( Col.GOLD, "------- Sentries Info for ", npcName, " (npcid - ",
+                                    String.valueOf( inst.getNPC().getId() ), ") ------" ) );
         
         joiner.add( String.join( "", 
-                Col.RED, "[Health]:", Col.WHITE, String.valueOf( inst.getHealth() ), "/", String.valueOf( inst.maxHealth ),
-                Col.RED, " [Armour]:", Col.WHITE, String.valueOf( inst.armour ),
-                Col.RED, " [Strength]:", Col.WHITE, String.valueOf( inst.strength ),
+                Col.RED, "[Health]:", Col.WHITE, Utils.formatDbl( inst.getHealth() ), "/", String.valueOf( inst.maxHealth ),
+                Col.RED, " [Armour]:", Col.WHITE, 
+                Sentries.useNewArmourCalc ? String.valueOf( Math.abs( inst.armour ) ) + "%"
+                                          : String.valueOf( Math.abs( inst.armour ) ), inst.armour < 0 ? "(C)" : "",
+                Col.RED, " [Strength]:", Col.WHITE, String.valueOf( inst.strength ), inst.strengthFromWeapon ? "(C)" : "",
                 Col.RED, " [Speed]:", Col.WHITE, Utils.formatDbl( inst.getSpeed() ),
                 Col.RED, " [AttackRange]:", Col.WHITE, String.valueOf( inst.range ),
                 Col.RED, " [AttackRate]:", Col.WHITE, String.valueOf( inst.attackRate ),
                 Col.RED, " [NightVision]:", Col.WHITE, String.valueOf( inst.nightVision ),
                 Col.RED, " [HealRate]:", Col.WHITE, String.valueOf( inst.healRate ),
                 Col.RED, " [VoiceRange]:", Col.WHITE, String.valueOf( inst.voiceRange ),
-                Col.RED, " [FollowDistance]:", Col.WHITE, String.valueOf( Math.sqrt( inst.followDistance ) ) ) );
+                Col.RED, " [FollowDistance]:", Col.WHITE, Utils.formatDbl( Math.sqrt( inst.followDistance ) ) ) );
 
         joiner.add( String.join( "", 
                 Col.GREEN, "Invincible: ", Col.WHITE, String.valueOf( inst.invincible ), 
@@ -44,19 +47,19 @@ public class InfoCommand implements SentriesComplexCommand {
                 Col.GREEN, "  Kills Drop Items: ", Col.WHITE, String.valueOf( inst.killsDrop ), 
                 Col.GREEN, "  Respawn Delay: ", Col.WHITE, String.valueOf( inst.respawnDelay ), " secs" ) );
         
-        joiner.add( String.join( "", Col.BLUE, "Status: ", Col.WHITE, inst.myStatus.toString() ) );
+        joiner.add( Utils.join( Col.BLUE, "Status: ", Col.WHITE, inst.getMyStatus().toString().toLowerCase() ) );
 
         if ( inst.attackTarget == null )
-            joiner.add( Col.BLUE.concat( "Currently Targetting: nothing" ) );
+            joiner.add( Utils.join( Col.BLUE, "Currently Targetting: ", Col.WHITE, "nothing" ) );
         else
-            joiner.add( String.join( "", Col.BLUE, "Currently Targetting: ", Col.WHITE, inst.attackTarget.getName() ) );
+            joiner.add( Utils.join( Col.BLUE, "Currently Targetting: ", Col.WHITE, inst.attackTarget.getName() ) );
 
         if ( inst.guardeeEntity != null )
-            joiner.add( String.join( "", Col.BLUE, "Guarding: ", Col.WHITE, inst.guardeeEntity.getName() ) );          
+            joiner.add( Utils.join( Col.BLUE, "Guarding: ", Col.WHITE, inst.guardeeEntity.getName() ) );          
         else if ( inst.guardeeName != null && !inst.guardeeName.isEmpty() )
-            joiner.add( String.join( "", Col.BLUE, npcName, " is configured to guard ", Col.WHITE, inst.guardeeName, 
+            joiner.add( Utils.join( Col.BLUE, npcName, " is configured to guard ", Col.WHITE, inst.guardeeName, 
                                                                   Col.BLUE, " but cannot find them at the moment." ) );
-        else joiner.add( String.join( "", Col.BLUE, "Guarding: ", Col.WHITE, "my spawnpoint" ) );
+        else joiner.add( Utils.join( Col.BLUE, "Guarding: ", Col.WHITE, "my spawnpoint" ) );
 
         sender.sendMessage( joiner.toString() );
     }

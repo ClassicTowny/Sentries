@@ -4,9 +4,9 @@ import java.util.StringJoiner;
 
 import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
-import org.jabelpeeps.sentries.AttackType;
 import org.jabelpeeps.sentries.S;
 import org.jabelpeeps.sentries.S.Col;
+import org.jabelpeeps.sentries.SentryAttack;
 import org.jabelpeeps.sentries.SentryTrait;
 import org.jabelpeeps.sentries.Utils;
 
@@ -15,14 +15,14 @@ import net.citizensnpcs.api.ai.Navigator;
 import net.citizensnpcs.api.ai.TargetType;
 import net.citizensnpcs.api.npc.NPC;
 
-public class DebugInfoCommand implements SentriesComplexCommand {
+public class DebugInfoCommand implements SentriesSimpleCommand {
     
     @Getter final String shortHelp = "view a sentry's debug information";
     @Getter final String longHelp = "Displays a page of internal field values and other information for a sentry.";
-    @Getter final String perm = S.PERM_CITS_ADMIN;
+    @Getter final String perm = S.PERM_DEBUGINFO;
     
     @Override
-    public void call( CommandSender sender, String npcName, SentryTrait inst, int nextArg, String... args ) {
+    public void call( CommandSender sender, String npcName, SentryTrait inst ) {
 
         StringJoiner joiner = new StringJoiner( System.lineSeparator() );
         NPC npc = inst.getNPC();
@@ -30,12 +30,15 @@ public class DebugInfoCommand implements SentriesComplexCommand {
         joiner.add( Utils.join( Col.GOLD, "------- Debug Info for ", npcName, " (npcid - ",
                                     String.valueOf( inst.getNPC().getId() ), ") ", "------" ) );
                
-        joiner.add( Utils.join( Col.BLUE, "Status: ", Col.WHITE, inst.myStatus.toString() ) );
+        joiner.add( Utils.join( Col.BLUE, "Status: ", Col.WHITE, inst.getMyStatus().toString().toLowerCase() ) );
         joiner.add( Utils.join( Col.BLUE, "Mounted: ", Col.WHITE, String.valueOf( inst.hasMount() ), 
                                  inst.hasMount() ? ( " (mountID = " + inst.mountID + ")" ) : "" ) );
-        AttackType attack = inst.getMyAttack();
+        
+        SentryAttack attack = inst.getMyAttack();
         if ( attack != null )
-            joiner.add( Utils.join( Col.BLUE, "AttackType: ", Col.WHITE, attack.name() ) );
+            joiner.add( Utils.join( Col.BLUE, "AttackType: ", Col.WHITE, attack.getName() ) );
+        else joiner.add( Utils.join( S.ERROR, "getMyAttack() returned null! ", 
+                                       Col.RESET, "(may be null if the npc has not been spawned yet)" ) );
         
         Location stored = npc.getStoredLocation();
         joiner.add( Utils.join( Col.BLUE, "StoredLocation: ", Col.WHITE, Utils.prettifyLocation( stored ) ) );
@@ -59,6 +62,7 @@ public class DebugInfoCommand implements SentriesComplexCommand {
         
         sender.sendMessage( joiner.toString() );
     }
+    
     private String distanceOf( Location from, Location to ) {
         return from.getWorld() != to.getWorld() 
                 ? "(not in current world)"

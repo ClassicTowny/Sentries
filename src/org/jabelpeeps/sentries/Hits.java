@@ -13,7 +13,7 @@ enum Hits {
     Glance( 0.5, 4, "&f*** Your paltry blow does only <AMOUNT> damage to <NPC>" ), 
     Miss( 0, 4, "&7*** You MISSED! <NPC> thumbs their nose at you!" ), 
     Hit( 1.0, 0, "" ),             // represents a standard unmodified hit.
-    Block( 0, 0, "&7*** <NPC> skillfully parries your attack!" );
+    Block( 0, 2, "&7*** <NPC> skillfully parries your attack!" );
 
     double damageModifier;
     private int percentChance;
@@ -25,6 +25,7 @@ enum Hits {
     private static Set<Hits> randomisedHits = EnumSet.range( Hits.Crit3, Hits.Miss );
     static {
         if ( Sentries.useNewArmourCalc ) randomisedHits.add( Block );
+        makeChanceMap();
     }
 
     Hits( double mod, int chance, String msg ) {
@@ -33,6 +34,7 @@ enum Hits {
         message = msg;
     }
 
+    /** If useCriticals is configured, returns a randomised Hits instance */
     static Hits getHit() {
         if ( useCriticalHits ) {
 
@@ -46,7 +48,7 @@ enum Hits {
         return Hits.Hit;
     }
 
-    static void makeChanceMap() {
+    private static void makeChanceMap() {
         int total = 0;
 
         for ( Hits each : randomisedHits ) {
@@ -73,7 +75,6 @@ enum Hits {
         if ( Sentries.useNewArmourCalc ) {
             Hits.Block.percentChance = config.getInt( "HitChances.Block" );
         }
-
         makeChanceMap();
     }
 }

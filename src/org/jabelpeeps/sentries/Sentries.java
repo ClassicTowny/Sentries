@@ -34,8 +34,7 @@ import net.citizensnpcs.api.trait.TraitInfo;
 public class Sentries extends JavaPlugin {
 
     public static boolean debug = false;
-
-    public static boolean dieLikePlayers, bodyguardsObeyProtection, ignoreListIsInvincible, useNewArmourCalc;
+    public static boolean bodyguardsObeyProtection, ignoreListIsInvincible, useNewArmourCalc;
 
     static boolean denizenActive = false;
     static Set<PluginBridge> activePlugins = new HashSet<>();
@@ -55,15 +54,8 @@ public class Sentries extends JavaPlugin {
     
     public static Set<EntityType> mobs = EnumSet.allOf( EntityType.class );
 
-    public static Map<String, Integer> equipmentSlots = new HashMap<>();
     static {
         mobs.removeIf( e -> !e.isAlive() );
-        equipmentSlots.put( "hand", 0 );
-        equipmentSlots.put( "helmet", 1 );
-        equipmentSlots.put( "chestplate", 2 );
-        equipmentSlots.put( "leggings", 3 );
-        equipmentSlots.put( "boots", 4 );
-        equipmentSlots.put( "offhand", 5 );
     }
     
     static Map<Material, Double> armorValues = new EnumMap<>( Material.class );
@@ -169,7 +161,6 @@ public class Sentries extends JavaPlugin {
         AttackType.loadWeapons( config );
         Hits.loadConfig( config );
 
-        dieLikePlayers = config.getBoolean( "Server.DieLikePlayers", false );
         bodyguardsObeyProtection = config.getBoolean( "Server.BodyguardsObeyProtection", true );
         ignoreListIsInvincible = config.getBoolean( "Server.IgnoreListInvincibility", true );
         useNewArmourCalc = config.getBoolean( "Server.UseNewArmourCalc", false );

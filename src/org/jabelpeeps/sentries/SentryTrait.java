@@ -1,7 +1,6 @@
 package org.jabelpeeps.sentries;
 
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +8,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -16,6 +16,7 @@ import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.command.CommandSender;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Blaze;
 import org.bukkit.entity.Creeper;
 import org.bukkit.entity.EnderDragon;
@@ -23,34 +24,35 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Ghast;
 import org.bukkit.entity.Horse;
-import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Skeleton;
 import org.bukkit.entity.Snowman;
 import org.bukkit.entity.Witch;
 import org.bukkit.entity.Wither;
-import org.bukkit.event.EventHandler;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.potion.PotionEffect;
 import org.jabelpeeps.sentries.S.Col;
 import org.jabelpeeps.sentries.targets.TargetType;
 
 import lombok.Getter;
-import net.aufdemrand.denizen.npc.traits.HealthTrait;
+import lombok.Setter;
 import net.citizensnpcs.api.ai.AttackStrategy;
 import net.citizensnpcs.api.ai.Navigator;
 import net.citizensnpcs.api.ai.NavigatorParameters;
 import net.citizensnpcs.api.ai.StuckAction;
-import net.citizensnpcs.api.event.CitizensReloadEvent;
 import net.citizensnpcs.api.event.DespawnReason;
 import net.citizensnpcs.api.event.NPCDamageByEntityEvent;
 import net.citizensnpcs.api.event.NPCDamageEvent;
 import net.citizensnpcs.api.exception.NPCLoadException;
+import net.citizensnpcs.api.npc.MetadataStore;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.persistence.Persist;
 import net.citizensnpcs.api.trait.Trait;
+import net.citizensnpcs.api.trait.trait.Equipment;
+import net.citizensnpcs.api.trait.trait.Equipment.EquipmentSlot;
 import net.citizensnpcs.api.trait.trait.MobType;
 import net.citizensnpcs.api.trait.trait.Owner;
 import net.citizensnpcs.api.util.DataKey;
@@ -58,9 +60,7 @@ import net.citizensnpcs.util.NMS;
 import net.citizensnpcs.util.Util;
 
 public class SentryTrait extends Trait {
-
-    final Sentries sentry;
-
+    
     @Persist( S.PERSIST_SPAWN ) public Location spawnLocation;
     @Persist( S.PERSIST_MOUNT ) public int mountID = -1;
     @Persist( S.CON_NIGHT_VIS ) public int nightVision = Sentries.defIntegers.get( S.CON_NIGHT_VIS );
@@ -77,8 +77,7 @@ public class SentryTrait extends Trait {
     @Persist( S.CON_WEIGHT ) public double weight = Sentries.defDoubles.get( S.CON_WEIGHT );
     @Persist( S.CON_HEALTH ) public double maxHealth = Sentries.defDoubles.get( S.CON_HEALTH );
     
-    @Persist( S.CON_USE_WEAPON_STRENGTH ) 
-        public boolean strengthFromWeapon = Sentries.defBooleans.get( S.CON_USE_WEAPON_STRENGTH );
+    @Persist( S.CON_WEAPON4STRGTH ) public boolean strengthFromWeapon = Sentries.defBooleans.get( S.CON_WEAPON4STRGTH );
     @Persist( S.CON_KILLS_DROP ) public boolean killsDrop = Sentries.defBooleans.get( S.CON_KILLS_DROP );
     @Persist( S.CON_DROP_INV ) public boolean dropInventory = Sentries.defBooleans.get( S.CON_DROP_INV );
     @Persist( S.CON_MOBS_ATTACK ) public boolean targetable = Sentries.defBooleans.get( S.CON_MOBS_ATTACK );
@@ -93,8 +92,20 @@ public class SentryTrait extends Trait {
 
     @Persist( S.CON_GREETING ) public String greetingMsg = Sentries.defaultGreeting;
     @Persist( S.CON_WARNING ) public String warningMsg = Sentries.defaultWarning;
+       
+    static class SpokenTo {
+        private Set<Player> set = new HashSet<>();
+        
+        boolean hasPlayer( Player player ) {
+            return set.contains( player );
+        }
+        void addPlayer( Player player, int ticks ) {
+            set.add( player );            
+            Bukkit.getScheduler().runTaskLaterAsynchronously( Sentries.plugin, () -> set.remove( player ), ticks );
+        }
+    }
 
-    private Map<Player, Long> warningsGiven = new HashMap<>();
+    private SpokenTo spokenTo = new SpokenTo();
     Set<Player> myDamagers = new HashSet<>();
     List<PotionEffect> weaponSpecialEffects;
 
@@ -112,14 +123,16 @@ public class SentryTrait extends Trait {
     long okToTakedamage = 0;
     int epCount;
 
-    public SentryStatus myStatus = SentryStatus.NOT_SPAWNED;
-    SentryStatus oldStatus;
-    @Getter private AttackType myAttack;
+    @Getter private SentryStatus myStatus = SentryStatus.NOT_SPAWNED;
+    private SentryStatus oldStatus;
+    Map<Enchantment, Integer> myEnchants;
+    @Getter @Setter private SentryAttack myAttack;
     private Integer tickMe;
 
-    final static AttackStrategy mountedAttack = ( attacker, bukkitTarget ) -> {
+    @SuppressWarnings( "deprecation" )
+    final static AttackStrategy mountedAttack = ( attacker, target ) -> {
 
-        if ( attacker == bukkitTarget ) return true;
+        if ( attacker == target ) return true;
 
         Entity passenger = attacker.getPassenger();
 
@@ -128,11 +141,12 @@ public class SentryTrait extends Trait {
                                     .getNavigator()
                                     .getLocalParameters()
                                     .attackStrategy()
-                                    .handle( (LivingEntity) passenger, bukkitTarget );
+                                    .handle( (LivingEntity) passenger, target );
         }
         return false;
     };
     
+    @SuppressWarnings( "deprecation" )
     final static StuckAction setStuckStatus = ( npc, navigator ) -> {
 
         if ( !npc.isSpawned() ) return false;
@@ -149,55 +163,53 @@ public class SentryTrait extends Trait {
     
     public SentryTrait() {
         super( "sentries" );
-        sentry = (Sentries) Bukkit.getPluginManager().getPlugin( "Sentries" );
     }
     
     @SuppressWarnings( "unchecked" )
     @Override
     public void load( DataKey key ) throws NPCLoadException {
         if ( Sentries.debug ) Sentries.debugLog( npc.getName() + ":[" + npc.getId() + "] load() start" );
-  
+
         if ( key.keyExists( "traits" ) ) key = key.getRelative( "traits" );
 
         String guardee = key.getString( S.PERSIST_GUARDEE, null );
         if ( guardee != null ) guardeeName = guardee;
 
-        Set<String> validTargets = new HashSet<>();
+        Object rawTargets = key.getRaw( S.TARGETS );
+        Set<String> validTargets = new HashSet<>( rawTargets != null ? (Set<String>) rawTargets : Sentries.defaultTargets );
         
-        if ( key.getRaw( S.TARGETS ) != null )
-            validTargets.addAll( (Set<String>) key.getRaw( S.TARGETS ) );
-        else
-            validTargets.addAll( Sentries.defaultTargets );
+        if ( Sentries.debug ) Sentries.debugLog( "Loading Targets:- " + validTargets );
         
-        validTargets.parallelStream().filter( s -> !CommandHandler.callCommand( this, Utils.colon.split( s ) ) )
-        // the second callCommand() is only used if the first is unsuccessful.
-                                     .forEach( t -> CommandHandler.callCommand( this, S.TARGET, "add", t ) );
+        validTargets.stream().filter( s -> !CommandHandler.callCommand( this, Utils.colon.split( s ) ) )
+                             .forEach( t -> CommandHandler.callCommand( this, S.TARGET, S.ADD, t ) );
         
-        Set<String> ignoreTargets = new HashSet<>();
+        Object rawIgnores = key.getRaw( S.IGNORES );
+        Set<String> ignoreTargets = new HashSet<>( rawIgnores != null ? (Set<String>) rawIgnores : Sentries.defaultIgnores );
         
-        if ( key.getRaw( S.IGNORES ) != null )
-            ignoreTargets.addAll( (Set<String>) key.getRaw( S.IGNORES ) );
-        else
-            ignoreTargets.addAll( Sentries.defaultIgnores );
+        if ( Sentries.debug ) Sentries.debugLog( "Loading Ignores:- " + ignoreTargets );
         
-        ignoreTargets.parallelStream().filter( s -> !CommandHandler.callCommand( this, Utils.colon.split( s ) ) )
-                                      .forEach( i -> CommandHandler.callCommand( this, S.IGNORE, "add", i ) ); 
+        ignoreTargets.stream().filter( s -> !CommandHandler.callCommand( this, Utils.colon.split( s ) ) )
+                              .forEach( i -> CommandHandler.callCommand( this, S.IGNORE, S.ADD, i ) ); 
 
         Set<String> eventTargets = new HashSet<>();
         
         if ( key.getRaw( S.EVENTS ) != null )
             eventTargets.addAll( (Set<String>) key.getRaw( S.EVENTS ) );
         
-        eventTargets.parallelStream().forEach( e -> CommandHandler.callCommand( this, S.EVENT, "add", e ) );     
+        if ( Sentries.debug ) Sentries.debugLog( "Loading Events:- " + eventTargets );
+        
+        eventTargets.stream().forEach( e -> CommandHandler.callCommand( this, S.EVENT, S.ADD, e ) );     
     }
 
     @Override
     public void onSpawn() {
         if ( Sentries.debug ) Sentries.debugLog( npc.getName() + ":[" + npc.getId() + "] onSpawn()" );
      
-        LivingEntity myEntity = getMyEntity();
+        LivingEntity myEntity = (LivingEntity) npc.getEntity();
+        myEntity.setMetadata( S.SENTRIES_META, new FixedMetadataValue( Sentries.plugin, true ) );
 
         // check for illegal values
+        if ( followDistance < 1 ) followDistance = 1;
         if ( weight <= 0 ) weight = 1.0;
         if ( attackRate > 30 ) attackRate = 30.0;
         if ( maxHealth < 1 ) maxHealth = 1;
@@ -206,13 +218,12 @@ public class SentryTrait extends Trait {
         if ( respawnDelay < -1 ) respawnDelay = -1;
         if ( spawnLocation == null ) onCopy();
 
-        // Allow Denizen to handle the sentry's health if it is active.
-        if (    DenizenHook.sentryHealthByDenizen 
-                && npc.hasTrait( HealthTrait.class ) )
-            npc.removeTrait( HealthTrait.class );
-
+        MetadataStore meta = npc.data();
         // disable citizens respawning, because Sentries doesn't always raise EntityDeath
-        npc.data().set( NPC.RESPAWN_DELAY_METADATA, -1 );
+        meta.set( NPC.RESPAWN_DELAY_METADATA, -1 );
+        meta.set( NPC.TARGETABLE_METADATA, targetable );
+        npc.setProtected( invincible );
+        meta.set( NPC.DROPS_ITEMS_METADATA, dropInventory );
 
         myEntity.getAttribute( Attribute.GENERIC_MAX_HEALTH ).setBaseValue( maxHealth );
         setHealth( maxHealth );
@@ -220,9 +231,6 @@ public class SentryTrait extends Trait {
         myDamagers.clear();
         NMS.look( myEntity, myEntity.getLocation().getYaw(), 0 );
 
-        npc.setProtected( false );
-        npc.data().set( NPC.TARGETABLE_METADATA, targetable );
-        
         NavigatorParameters navigatorParams = npc.getNavigator().getDefaultParameters();
 
         navigatorParams.useNewPathfinder( true );
@@ -235,9 +243,11 @@ public class SentryTrait extends Trait {
         checkForGuardee();
        
         if ( tickMe == null ) {
-            tickMe = Bukkit.getScheduler().scheduleSyncRepeatingTask( sentry, 
-                    () -> {     
-                            myStatus = myStatus.update( SentryTrait.this );             
+            tickMe = Bukkit.getScheduler().scheduleSyncRepeatingTask( Sentries.plugin, 
+                    () -> { myStatus = myStatus.update( SentryTrait.this ); 
+                            if ( guardeeEntity != null && !guardeeEntity.isValid() ) {
+                                guardeeEntity = null;
+                            }
                             if ( Sentries.debug && oldStatus != myStatus ) {
                                 Sentries.debugLog( npc.getName() + " is now:- " + myStatus.name() );
                                 oldStatus = myStatus;
@@ -272,7 +282,14 @@ public class SentryTrait extends Trait {
         if ( runscripts && Sentries.denizenActive )
             DenizenHook.sentryDeath( myDamagers, npc );
     }
-
+    
+    /** Sets the Sentry's status directly to DEAD, and sets the respawnTime field according to the value of respawnDelay */
+    public void kill() {
+        if ( myStatus.isDeadOrDieing() ) return;
+        respawnTime = System.currentTimeMillis() + respawnDelay * 1000;
+        myStatus = SentryStatus.DEAD;
+    }
+     
     @Override
     public void onDespawn() {
         if ( Sentries.debug ) Sentries.debugLog( npc.getName() + ":[" + npc.getId() + "] onDespawn()" );
@@ -284,23 +301,15 @@ public class SentryTrait extends Trait {
     @Override
     public void save( DataKey key ) {
         if ( Sentries.debug ) Sentries.debugLog( npc.getName() + ":[" + npc.getId() + "] save()" );
-
-        Set<String> ignoreTargets = new HashSet<>();
-        Set<String> validTargets = new HashSet<>();
-        Set<String> eventTargets = new HashSet<>();
         
-        targets.forEach( s -> validTargets.add( s.getTargetString() ) );
-        ignores.forEach( s -> ignoreTargets.add( s.getTargetString() ) ); 
-        events.forEach( e -> eventTargets.add( e.getTargetString() ) );
-        
-        key.setRaw( S.TARGETS, validTargets );
-        key.setRaw( S.IGNORES, ignoreTargets );
-        key.setRaw( S.EVENTS, eventTargets );
+        key.setRaw( S.TARGETS, targets.stream().collect( Collectors.mapping( TargetType::getTargetString, Collectors.toSet() ) ) );
+        key.setRaw( S.IGNORES, ignores.stream().collect( Collectors.mapping( TargetType::getTargetString, Collectors.toSet() ) ) );
+        key.setRaw( S.EVENTS, events.stream().collect( Collectors.mapping( TargetType::getTargetString, Collectors.toSet() ) ) );
     }
 
     @Override
     public void onCopy() {
-        Bukkit.getScheduler().runTaskLater( sentry, () -> spawnLocation = npc.getStoredLocation(), 10 );
+        Bukkit.getScheduler().runTaskLater( Sentries.plugin, () -> spawnLocation = npc.getStoredLocation(), 10 );
     }
 
     public boolean isIgnoring( LivingEntity aTarget ) {
@@ -330,15 +339,15 @@ public class SentryTrait extends Trait {
     }
 
     public LivingEntity findTarget() {
-
-        LivingEntity myEntity = getMyEntity();
+        
+        Entity myEntity = npc.getEntity();
         int combinedRange = range + voiceRange;
         Location myLoc = myEntity.getLocation();
 
         LivingEntity theTarget = null;
         Double distanceToBeat = 99999.0;
 
-        for ( Entity aTarget : myEntity.getNearbyEntities( combinedRange, combinedRange / 2, combinedRange ) ) {
+        for ( Entity aTarget : myEntity.getNearbyEntities( combinedRange, combinedRange, combinedRange ) ) {
 
             if  (   !(aTarget instanceof LivingEntity) 
                     || !hasLOS( aTarget ) ) 
@@ -363,7 +372,7 @@ public class SentryTrait extends Trait {
 
                         Player player = (Player) aTarget;
                         player.sendMessage( Utils.format( warningMsg, npc, player, null, null ) );
-                        warningsGiven.put( player, System.currentTimeMillis() );
+                        spokenTo.addPlayer( player, 1200 );
                         if ( !getNavigator().isNavigating() ) Util.faceEntity( myEntity, aTarget );
                     }
                     else if ( dist < distanceToBeat ) {
@@ -377,7 +386,7 @@ public class SentryTrait extends Trait {
 
                 Player player = (Player) aTarget;
                 player.sendMessage( Utils.format( greetingMsg, npc, player, null, null ) );
-                warningsGiven.put( player, System.currentTimeMillis() );
+                spokenTo.addPlayer( player, 1200 );
                 Util.faceEntity( myEntity, player );
             }
         }
@@ -388,23 +397,16 @@ public class SentryTrait extends Trait {
         return voiceRange > 0 
                 && aTarget instanceof Player
                 && !aTarget.hasMetadata( "NPC" ) 
-                && (    !warningsGiven.containsKey( aTarget ) 
-                        || System.currentTimeMillis() > warningsGiven.get( aTarget ) + 60000 );
+                && !spokenTo.hasPlayer( (Player) aTarget );
     }
     
     public double getHealth() {
-        LivingEntity myEntity = getMyEntity();
+        LivingEntity myEntity = (LivingEntity) npc.getEntity();
         if ( myEntity == null ) return 0;
 
         return myEntity.getHealth();
     }
-    
-    /** Sets the Sentry's status to DEAD, and sets the respawnTime field according to the value of respawnDelay */
-     public void kill() {
-        respawnTime = System.currentTimeMillis() + respawnDelay * 1000;
-        myStatus = SentryStatus.DEAD;
-    }
-     
+
     /**
      * Calculates the damage to inflict on a sentry in the light of the current Armour settings.
      * It does not actually inflict the damage on the NPC.
@@ -425,34 +427,28 @@ public class SentryTrait extends Trait {
             Sentries.logger.log( Level.WARNING, "ERROR: no armour values have been loaded from config." );
             return false;
         }
+        boolean armourWorn = false;
+        
         if ( armour < 0 ) { // values less than 0 indicate a calculated value that needs refreshing
             armour = 0;
-            LivingEntity myEntity = getMyEntity();
-            ItemStack[] myArmour;  
+            ItemStack[] myArmour = npc.getTrait( Equipment.class ).getEquipment();
             
-            if ( myEntity instanceof Player )
-                myArmour = ((Player) myEntity).getInventory().getArmorContents();
-            else
-                myArmour = myEntity.getEquipment().getArmorContents();
-            
-            boolean armourWorn = false;
             for ( ItemStack is : myArmour ) {
                 if ( is == null ) continue;
                 Material item = is.getType();
-                armourWorn = true;
-                if ( Sentries.armorValues.containsKey( item ) )
+                if ( Sentries.armorValues.containsKey( item ) ) {
                     armour -= Sentries.armorValues.get( item );
+                    armourWorn = true;
+                }
             }
             if ( !Sentries.useNewArmourCalc ) armour *= 10;
-            
-            return armourWorn;
         }
-        return false;
+        return armourWorn;
     }
     
     public float getSpeed() {
 
-        LivingEntity myEntity = getMyEntity();
+        Entity myEntity = npc.getEntity();
         
         if ( myEntity == null ) return (float) speed;
 
@@ -477,38 +473,37 @@ public class SentryTrait extends Trait {
             return false;
         }
         if ( strengthFromWeapon ) { 
+            ItemStack item = npc.getTrait( Equipment.class ).get( EquipmentSlot.HAND );
+            
+            if ( item != null && Sentries.weaponStrengths.containsKey( item.getType() ) ) {
+                strength = Sentries.weaponStrengths.get( item.getType() );
+                
+                myEnchants = item.getEnchantments();
+                if ( myEnchants != null && myEnchants.isEmpty() ) myEnchants = null;
+                return true;
+            }
             if ( myAttack != AttackType.BRAWLER ) {
                 strength = myAttack.getDamage();
                 return true;
             }
-            LivingEntity myEntity = getMyEntity();
-            Material item = null;
-            
-            if ( myEntity instanceof Player )
-                item = ((Player) myEntity).getInventory().getItemInMainHand().getType();  
-            else 
-                item = myEntity.getEquipment().getItemInMainHand().getType();
-            
-            if ( item != null && Sentries.weaponStrengths.containsKey( item ) ) {
-                strength = Sentries.weaponStrengths.get( item );
-                return true;
-            }
             strength = 1;
         }
-        return false;
+        return true;
     }
 
     private static Set<AttackType> pyros = EnumSet.range( AttackType.PYRO1, AttackType.PYRO3 );
     private static Set<AttackType> stormCallers = EnumSet.range( AttackType.STORMCALLER1, AttackType.STORMCALLER3 );
     private static Set<AttackType> notFlammable = EnumSet.range( AttackType.PYRO1, AttackType.STORMCALLER3 );
-    private static Set<AttackType> lightsFires = EnumSet.of( AttackType.PYRO1, AttackType.STROMCALLER2 );
+    private static Set<AttackType> lightsFires = EnumSet.of( AttackType.PYRO1, AttackType.STORMCALLER2 );
+    private static Set<AttackType> witchDoctors = EnumSet.of( AttackType.WITCHDOCTOR1, AttackType.WITCHDOCTOR2 );
 
     public boolean isPyromancer() { return pyros.contains( myAttack ); }
     public boolean isStormcaller() { return stormCallers.contains( myAttack ); }
     public boolean isWarlock1() { return myAttack == AttackType.WARLOCK1; }
-    public boolean isWitchDoctor() { return myAttack == AttackType.WITCHDOCTOR; }
+    public boolean isWitchDoctor() { return witchDoctors.contains( myAttack ); }
     public boolean isNotFlammable() { return notFlammable.contains( myAttack ); }
-    public boolean lightsFires() { return lightsFires.contains( myAttack ); }   
+    public boolean lightsFires() { return lightsFires.contains( myAttack ); } 
+    public boolean isGrenadier() { return myAttack == AttackType.GRENADIER; }
     boolean isMyChunkLoaded() { return Util.isLoaded( npc.getStoredLocation() ); }
     
     /** 
@@ -519,7 +514,7 @@ public class SentryTrait extends Trait {
         
         if ( healRate > 0 && System.currentTimeMillis() > oktoheal ) {
 
-            LivingEntity myEntity = getMyEntity();
+            LivingEntity myEntity = (LivingEntity) npc.getEntity();
             if ( myEntity == null ) return;
             
             double health = getHealth();
@@ -633,7 +628,7 @@ public class SentryTrait extends Trait {
      */
     public boolean findOtherGuardEntity( String name ) {
         if ( npc == null || name == null ) return false;
-        LivingEntity myEntity = getMyEntity();
+        Entity myEntity = npc.getEntity();
         if ( myEntity == null ) return false;
 
         for ( Entity each : myEntity.getNearbyEntities( range, range, range ) ) {
@@ -661,14 +656,14 @@ public class SentryTrait extends Trait {
     }
 
     public void setHealth( double health ) {
-        LivingEntity myEntity = getMyEntity();
+        LivingEntity myEntity = (LivingEntity) npc.getEntity();
         if ( myEntity == null ) return;
 
         myEntity.setHealth( health > maxHealth ? maxHealth : health );
     }
 
     /**
-     * Updates the Attacktype reference in myAttack field, according to the
+     * Updates the SentryAttack reference in myAttack field, according to the
      * item being held by the NPC.
      * <p>
      * Also sets potion effects, and potion types if appropriate.
@@ -676,61 +671,44 @@ public class SentryTrait extends Trait {
     public void updateAttackType() {
 
         Material weapon = Material.AIR;
-        ItemStack item = null;
-        LivingEntity myEntity = getMyEntity();
-        myAttack = null;
-
-        if ( myEntity instanceof HumanEntity )
-            item = ((HumanEntity) myEntity).getInventory().getItemInMainHand(); 
-        else 
-            item = myEntity.getEquipment().getItemInMainHand();
+        ItemStack heldItem = npc.getTrait( Equipment.class ).get( EquipmentSlot.HAND );
+        myAttack = AttackType.BRAWLER;
         
-        if ( item != null ) {
-            weapon = item.getType();
+        if ( heldItem != null ) {
+            weapon = heldItem.getType();
             myAttack = AttackType.find( weapon );
 
-            if ( myAttack != AttackType.WITCHDOCTOR )
-                item.setDurability( (short) 0 );  
+            if ( !isWitchDoctor() )
+                heldItem.setDurability( (short) 0 );  
         }
         
-        if ( myAttack == null ) {
+        if ( myAttack == AttackType.BRAWLER ) {
+            Entity myEntity = npc.getEntity();
+            
             if ( myEntity instanceof Skeleton ) myAttack = AttackType.ARCHER;
             else if ( myEntity instanceof Ghast ) myAttack = AttackType.PYRO3;
             else if ( myEntity instanceof Snowman ) myAttack = AttackType.ICEMAGI;
             else if ( myEntity instanceof Wither ) myAttack = AttackType.WARLOCK2;
-            else if ( myEntity instanceof Witch ) myAttack = AttackType.WITCHDOCTOR;
+            else if ( myEntity instanceof Witch ) myAttack = AttackType.WITCHDOCTOR1;
             else if ( myEntity instanceof Creeper ) myAttack = AttackType.CREEPER;
             else if ( myEntity instanceof Blaze || myEntity instanceof EnderDragon ) myAttack = AttackType.PYRO2;
-            else myAttack = AttackType.BRAWLER;
         }
         
-        if ( myAttack == AttackType.WITCHDOCTOR ) {
-            if ( item == null ) {
-                item = new ItemStack( Material.SPLASH_POTION, 1, (short) 16396 );
+        if ( isWitchDoctor() ) {
+            if ( heldItem == null ) {
+                heldItem = new ItemStack( Material.SPLASH_POTION, 1, (short) 16396 );
                 // TODO send message to owner about equipping a proper potion.
             }
-            potionItem = item;
+            potionItem = heldItem;
             weaponSpecialEffects = null;
         }
         else {
             potionItem = null;
             weaponSpecialEffects = Sentries.weaponEffects.get( weapon );
-        }
-        NavigatorParameters params = npc.getNavigator().getDefaultParameters();
-        params.attackStrategy( myAttack );       
-        setRange( params );
+        }    
         updateStrength();
     }
 
-    public void setRange() {
-        setRange( npc.getNavigator().getDefaultParameters() );
-    }
-    private void setRange( NavigatorParameters params ) {
-        if ( myAttack.isMelee() )
-            params.attackRange( 1.5 );
-        else
-            params.attackRange( Utils.sqr( range ) );
-    }
     /**
      *  Cancels the current navigation (including targetted attacks) and 
      *  clears the held reference for the target. <p>
@@ -739,18 +717,27 @@ public class SentryTrait extends Trait {
     public void cancelAttack() {
         getNavigator().cancelNavigation();
         attackTarget = null; 
+        myStatus = SentryStatus.LOOKING;
     }
 
-    public void checkIfEmpty ( CommandSender sender ) {
-        if ( targets.isEmpty() && events.isEmpty() )
-            Utils.sendMessage( sender, Col.YELLOW, npc.getName(), " now has no defined targets." );
+    /** Sends a message to the sender if the sentry has no defined targets or events 
+     *  @return true - if ignores is also empty */
+    public boolean checkIfEmpty ( CommandSender sender ) {
+        if ( targets.isEmpty() && events.isEmpty() ) {
+            Utils.sendMessage( sender, Col.YELLOW, npc.getName(), " has no defined targets ", 
+                                    ignores.isEmpty() ? ", events or ignores." : "or events." );
+            
+            return ignores.isEmpty();
+        }
+        return false;
+    }
+    boolean isBodyguardOnLeave( ) {
+        return guardeeName != null && !guardeeName.isEmpty() && guardeeEntity == null;
     }
     
     boolean setAttackTarget( LivingEntity theEntity ) {
-        LivingEntity myEntity = getMyEntity();
+        Entity myEntity = npc.getEntity();
         if ( myEntity == null || theEntity == myEntity || theEntity == guardeeEntity ) return false;
-        // don't attack when bodyguard target isn't around.
-        if ( guardeeName != null && guardeeEntity == null ) return false;
 
         attackTarget = theEntity;
         myStatus = SentryStatus.ATTACKING;
@@ -775,7 +762,7 @@ public class SentryTrait extends Trait {
        
         NPC mount = getMountNPC();
         
-        if ( mount != null && mount.isSpawned() && getMyEntity().isInsideVehicle() ) {
+        if ( mount != null && mount.isSpawned() && npc.getEntity().isInsideVehicle() ) {
             return mount;
         }
         return npc;
@@ -784,7 +771,7 @@ public class SentryTrait extends Trait {
     public void mount() {
         if ( npc.isSpawned() ) {
 
-            LivingEntity myEntity = getMyEntity();
+            Entity myEntity = npc.getEntity();
 
             if ( myEntity.isInsideVehicle() )
                 myEntity.getVehicle().setPassenger( null );
@@ -799,10 +786,10 @@ public class SentryTrait extends Trait {
                 mountID = mount.getId();
                 mount.setProtected( false );
             }
-            else if ( !mount.isSpawned() ) {
+            else if ( mount.isSpawned() ) {
                 mount.despawn( DespawnReason.PENDING_RESPAWN );
             }
-            mount.spawn( getMyEntity().getLocation() );
+            mount.spawn( npc.getEntity().getLocation() );
 
             NavigatorParameters mountParams = mount.getNavigator().getDefaultParameters();
             NavigatorParameters myParams = npc.getNavigator().getDefaultParameters();
@@ -822,7 +809,7 @@ public class SentryTrait extends Trait {
 
     public void dismount() {
 
-        LivingEntity myEntity = getMyEntity();
+        Entity myEntity = npc.getEntity();
         
         if ( myEntity != null && myEntity.isInsideVehicle() ) {
 
@@ -830,7 +817,7 @@ public class SentryTrait extends Trait {
 
             if ( mount != null ) {
                 Utils.copyNavParams( mount.getNavigator().getDefaultParameters(), npc.getNavigator().getDefaultParameters() );
-                myEntity.getVehicle().setPassenger( null );
+                myEntity.getVehicle().setPassenger( myEntity );
                 mount.despawn( DespawnReason.PENDING_RESPAWN );
             }
         }
@@ -839,7 +826,7 @@ public class SentryTrait extends Trait {
     void reMountMount() {
            
         if (    npc.isSpawned() 
-                && !getMyEntity().isInsideVehicle() 
+                && !npc.getEntity().isInsideVehicle() 
                 && hasMount()
                 && isMyChunkLoaded() )
             mount();
@@ -850,21 +837,11 @@ public class SentryTrait extends Trait {
     public boolean hasLOS( Entity other ) {
         if ( ignoreLOS ) return true;
         
-        LivingEntity myEntity = getMyEntity();
+        LivingEntity myEntity = (LivingEntity) npc.getEntity();
         
         if ( myEntity != null ) {
             return myEntity.hasLineOfSight( other );
         }
         return false;
-    }
-
-    /** Returns the entity of this NPC *only* if the NPC is spawned. Otherwise returns null. */
-    public LivingEntity getMyEntity() {
-        return (LivingEntity) npc.getEntity();
-    }
-
-    @EventHandler
-    public void onCitReload( CitizensReloadEvent event ) {
-        cancelRunnable();
-    }    
+    }  
 }
